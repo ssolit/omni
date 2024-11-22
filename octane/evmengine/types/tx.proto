@@ -39,3 +39,7 @@ message EVMEvent {
   repeated bytes topics  = 2; // List of topics provided by the contract (N * 32 bytes).
   bytes          data    = 3; // Data supplied by the contract, usually ABI-encoded.
 }
+
+message MsgSeismicSidecar {
+  string enclave_sig = 1;
+}
