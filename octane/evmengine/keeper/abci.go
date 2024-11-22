@@ -147,8 +147,12 @@ func (k *Keeper) PrepareProposal(ctx sdk.Context, req *abci.RequestPreparePropos
 	}
 
 	// Combine all the votes messages and the payload message into a single transaction.
+	seismicMsg := &types.MsgSeismicSidecar{
+		EnclaveSig: "example_signature",
+	}
+
 	b := k.txConfig.NewTxBuilder()
-	if err := b.SetMsgs(append(voteMsgs, payloadMsg)...); err != nil {
+	if err := b.SetMsgs(append(voteMsgs, payloadMsg, seismicMsg)...); err != nil {
 		return nil, errors.Wrap(err, "set tx builder msgs")
 	}
 
