@@ -31,3 +31,5 @@ venv
 .goreleaser-local.yaml
 # Temp file created by TestJoinOmega
 scripts/join/join_test.log
+
+node_modules
