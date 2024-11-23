@@ -27,6 +27,7 @@ type Secrets struct {
 const (
 	promPort     = 26660 // Default metrics port for all omni apps (from cometBFT)
 	gethPromPort = 6060
+	rethHttpPort = 8545
 )
 
 //go:embed prometheus.yaml.tmpl
