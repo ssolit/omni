@@ -1,5 +1,6 @@
 {
   "dependencies": {
+    "@adraffy/ens-normalize": "^1.11.0",
     "ethers": "^6.13.4"
   }
 }
