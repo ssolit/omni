@@ -2,6 +2,7 @@ package ethclient
 
 import (
 	"context"
+	"math/big"
 	"net/http"
 	"time"
 
@@ -10,6 +11,8 @@ import (
 
 	"github.com/ethereum/go-ethereum/beacon/engine"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/hexutil"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/rpc"
 )
 
@@ -67,9 +70,117 @@ func NewAuthClient(ctx context.Context, urlAddr string, jwtSecret []byte) (Engin
 	}, nil
 }
 
+//go:generate go run github.com/fjl/gencodec -type RethPayloadV3 -field-override rethPayloadV3Marshaling -out gen_reth_payload_v3.go
+
+type RethPayloadV3 struct {
+	ParentHash    common.Hash         `json:"parentHash"    gencodec:"required"`
+	FeeRecipient  common.Address      `json:"feeRecipient"  gencodec:"required"`
+	StateRoot     common.Hash         `json:"stateRoot"     gencodec:"required"`
+	ReceiptsRoot  common.Hash         `json:"receiptsRoot"  gencodec:"required"`
+	LogsBloom     []byte              `json:"logsBloom"     gencodec:"required"`
+	Random        common.Hash         `json:"prevRandao"    gencodec:"required"`
+	Number        uint64              `json:"blockNumber"   gencodec:"required"`
+	GasLimit      uint64              `json:"gasLimit"      gencodec:"required"`
+	GasUsed       uint64              `json:"gasUsed"       gencodec:"required"`
+	Timestamp     uint64              `json:"timestamp"     gencodec:"required"`
+	ExtraData     []byte              `json:"extraData"     gencodec:"required"`
+	BaseFeePerGas *big.Int            `json:"baseFeePerGas" gencodec:"required"`
+	BlockHash     common.Hash         `json:"blockHash"     gencodec:"required"`
+	Transactions  [][]byte            `json:"transactions"  gencodec:"required"`
+	Withdrawals   []*types.Withdrawal `json:"withdrawals"`
+	BlobGasUsed   *uint64             `json:"blobGasUsed"`
+	ExcessBlobGas *uint64             `json:"excessBlobGas"`
+	// Deposits         types.Deposits          `json:"depositRequests"`
+	ExecutionWitness *types.ExecutionWitness `json:"executionWitness,omitempty"`
+}
+
+type rethPayloadV3Marshaling struct {
+	Number        hexutil.Uint64
+	GasLimit      hexutil.Uint64
+	GasUsed       hexutil.Uint64
+	Timestamp     hexutil.Uint64
+	BaseFeePerGas *hexutil.Big
+	ExtraData     hexutil.Bytes
+	LogsBloom     hexutil.Bytes
+	Transactions  []hexutil.Bytes
+	BlobGasUsed   *hexutil.Uint64
+	ExcessBlobGas *hexutil.Uint64
+}
+
+// ConvertExecutableDataToRethPayloadV3 converts ExecutableData to RethPayloadV3.
+func ConvertExecutableDataToRethPayloadV3(ed engine.ExecutableData) RethPayloadV3 {
+	var baseFee *big.Int
+	if ed.BaseFeePerGas != nil {
+		baseFee = new(big.Int).Set(ed.BaseFeePerGas)
+	}
+
+	var blobGasUsed *uint64
+	if ed.BlobGasUsed != nil {
+		blobGasUsed = new(uint64)
+		*blobGasUsed = *ed.BlobGasUsed
+	}
+
+	var excessBlobGas *uint64
+	if ed.ExcessBlobGas != nil {
+		excessBlobGas = new(uint64)
+		*excessBlobGas = *ed.ExcessBlobGas
+	}
+
+	return RethPayloadV3{
+		ParentHash:       ed.ParentHash,
+		FeeRecipient:     ed.FeeRecipient,
+		StateRoot:        ed.StateRoot,
+		ReceiptsRoot:     ed.ReceiptsRoot,
+		LogsBloom:        ed.LogsBloom,
+		Random:           ed.Random,
+		Number:           ed.Number,
+		GasLimit:         ed.GasLimit,
+		GasUsed:          ed.GasUsed,
+		Timestamp:        ed.Timestamp,
+		ExtraData:        ed.ExtraData,
+		BaseFeePerGas:    baseFee,
+		BlockHash:        ed.BlockHash,
+		Transactions:     copyTransactions(ed.Transactions),
+		Withdrawals:      copyWithdrawals(ed.Withdrawals),
+		BlobGasUsed:      blobGasUsed,
+		ExcessBlobGas:    excessBlobGas,
+		ExecutionWitness: ed.ExecutionWitness, // Assuming it's safe to assign directly
+	}
+}
+
+// copyTransactions creates a deep copy of the transactions slice.
+func copyTransactions(transactions [][]byte) [][]byte {
+	if transactions == nil {
+		return [][]byte{}
+	}
+	copied := make([][]byte, len(transactions))
+	for i, tx := range transactions {
+		if tx != nil {
+			copied[i] = append([]byte(nil), tx...)
+		}
+	}
+	return copied
+}
+
+// copyWithdrawals creates a deep copy of the withdrawals slice.
+func copyWithdrawals(withdrawals []*types.Withdrawal) []*types.Withdrawal {
+	if withdrawals == nil {
+		return []*types.Withdrawal{}
+	}
+	copied := make([]*types.Withdrawal, len(withdrawals))
+	for i, withdrawal := range withdrawals {
+		if withdrawal != nil {
+			copied[i] = withdrawal // Assuming Withdrawal is immutable or doesn't require deep copy
+		}
+	}
+	return copied
+}
+
 func (c engineClient) NewPayloadV3(ctx context.Context, params engine.ExecutableData, versionedHashes []common.Hash,
 	beaconRoot *common.Hash,
 ) (engine.PayloadStatusV1, error) {
+	log.Debug(ctx, "Entering NewPayloadV3. Converting standard paylod to Seismic Reth payload", nil)
+	rethPayload := ConvertExecutableDataToRethPayloadV3(params)
 	const endpoint = "new_payload_v3"
 	defer latency(c.chain, endpoint)()
 
@@ -84,7 +195,7 @@ func (c engineClient) NewPayloadV3(ctx context.Context, params engine.Executable
 	}
 
 	var resp engine.PayloadStatusV1
-	err := c.cl.Client().CallContext(ctx, &resp, newPayloadV3, params, versionedHashes, beaconRoot)
+	err := c.cl.Client().CallContext(ctx, &resp, newPayloadV3, rethPayload, versionedHashes, beaconRoot)
 	if isStatusOk(resp) {
 		// Swallow errors when geth returns errors along with proper responses (but at least log it).
 		if err != nil {
